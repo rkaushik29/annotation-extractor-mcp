@@ -1,6 +1,6 @@
 [project]
 name = "annotation-extractor"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for extracting annotations and highlights from e-readers (Kobo, Kindle, and more)"
 readme = "README.md"
 license = "MIT"
