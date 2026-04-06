@@ -1,10 +1,12 @@
 """Backend registry — discovery, auto-detection, and routing."""
 
 from annotation_extractor.backends.base import EReaderBackend
+from annotation_extractor.backends.kindle import KindleBackend
 from annotation_extractor.backends.kobo import KoboBackend
 
 _ALL_BACKENDS: list[EReaderBackend] = [
     KoboBackend(),
+    KindleBackend(),
 ]
 
 
@@ -35,15 +37,23 @@ def get_backend(
         raise ValueError(f"Unknown backend: {backend_name!r}. Available: {names}")
 
     if db_path:
-        # If a path is given but no backend name, try each backend
-        # to see which one can handle it. Fall back to the first backend.
+        # Infer backend from file extension/name
+        if db_path.endswith(".txt"):
+            for b in _ALL_BACKENDS:
+                if b.name == "kindle":
+                    return b
+        if db_path.endswith(".sqlite"):
+            for b in _ALL_BACKENDS:
+                if b.name == "kobo":
+                    return b
         return _ALL_BACKENDS[0]
 
     results = detect_backends()
     if not results:
         raise RuntimeError(
             "No e-reader detected. Connect a device via USB, "
-            "set KOBO_DB_PATH, or provide backend_name and db_path."
+            "set KOBO_DB_PATH / KINDLE_CLIPPINGS_PATH, "
+            "or provide backend_name and db_path."
         )
     if len(results) > 1:
         names = [r[0].name for r in results]
