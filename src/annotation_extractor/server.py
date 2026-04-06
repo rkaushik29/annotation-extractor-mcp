@@ -33,6 +33,7 @@ def list_books(
     backend_name: Optional[str] = None,
     db_path: Optional[str] = None,
     with_annotations_only: bool = True,
+    limit: Optional[int] = None,
 ) -> list[dict]:
     """List all books on the connected e-reader.
 
@@ -43,13 +44,14 @@ def list_books(
                  If not provided, auto-detects the mounted device.
         with_annotations_only: If True, only return books that have
                                at least one highlight or annotation.
+        limit: Maximum number of results to return. Defaults to 500.
 
     Returns:
         List of books with title, author, content_id, annotation_count,
         last_read, time_spent_minutes, read_status, and source.
     """
     backend = get_backend(backend_name, db_path)
-    books = backend.list_books(db_path=db_path, with_annotations_only=with_annotations_only)
+    books = backend.list_books(db_path=db_path, with_annotations_only=with_annotations_only, limit=limit)
     return [b.to_dict() for b in books]
 
 
@@ -61,6 +63,7 @@ def get_annotations(
     db_path: Optional[str] = None,
     highlights_only: bool = False,
     notes_only: bool = False,
+    limit: Optional[int] = None,
 ) -> list[dict]:
     """Get highlights and annotations for a specific book.
 
@@ -73,6 +76,7 @@ def get_annotations(
         db_path: Optional explicit path to the e-reader database.
         highlights_only: Only return highlights (no user notes).
         notes_only: Only return entries that have a user-written note.
+        limit: Maximum number of results to return. Defaults to 500.
 
     Returns:
         List of annotations with highlighted_text, note, chapter,
@@ -85,6 +89,7 @@ def get_annotations(
         db_path=db_path,
         highlights_only=highlights_only,
         notes_only=notes_only,
+        limit=limit,
     )
     return [a.to_dict() for a in annotations]
 
@@ -94,6 +99,7 @@ def search_annotations(
     query: str,
     backend_name: Optional[str] = None,
     db_path: Optional[str] = None,
+    limit: Optional[int] = None,
 ) -> list[dict]:
     """Search across all highlights and notes on the e-reader.
 
@@ -103,12 +109,13 @@ def search_annotations(
         query: Text to search for (case-insensitive, partial match).
         backend_name: Which e-reader backend to use. Auto-detected if omitted.
         db_path: Optional explicit path to the e-reader database.
+        limit: Maximum number of results to return. Defaults to 500.
 
     Returns:
         Matching annotations with book context.
     """
     backend = get_backend(backend_name, db_path)
-    annotations = backend.search_annotations(query=query, db_path=db_path)
+    annotations = backend.search_annotations(query=query, db_path=db_path, limit=limit)
     return [a.to_dict() for a in annotations]
 
 
@@ -116,19 +123,21 @@ def search_annotations(
 def get_reading_progress(
     backend_name: Optional[str] = None,
     db_path: Optional[str] = None,
+    limit: Optional[int] = None,
 ) -> list[dict]:
     """Get reading progress for all books on the e-reader.
 
     Args:
         backend_name: Which e-reader backend to use. Auto-detected if omitted.
         db_path: Optional explicit path to the e-reader database.
+        limit: Maximum number of results to return. Defaults to 500.
 
     Returns:
         List of books with title, author, percent_read,
         time_spent_minutes, last_read, read_status, and source.
     """
     backend = get_backend(backend_name, db_path)
-    progress = backend.get_reading_progress(db_path=db_path)
+    progress = backend.get_reading_progress(db_path=db_path, limit=limit)
     return [p.to_dict() for p in progress]
 
 

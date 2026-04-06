@@ -68,21 +68,6 @@ INSERT INTO Bookmark VALUES
 """
 
 
-def _create_test_db() -> str:
-    """Create an in-memory test database and return a temp file path."""
-    import tempfile
-    import os
-
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
-    os.close(fd)
-
-    conn = sqlite3.connect(path)
-    conn.executescript(SCHEMA)
-    conn.executescript(SEED_DATA)
-    conn.close()
-    return path
-
-
 @pytest.fixture
 def db_path(tmp_path):
     """Create a test SQLite database and return its path."""
@@ -263,7 +248,13 @@ class TestDetect:
 
     def test_resolve_path_missing_file(self, backend):
         with pytest.raises(FileNotFoundError):
-            backend._resolve_path("/nonexistent/path.sqlite")
+            backend._resolve_path("/nonexistent/KoboReader.sqlite")
+
+    def test_resolve_path_rejects_non_kobo_db(self, backend, tmp_path):
+        bad_db = tmp_path / "browser_history.sqlite"
+        bad_db.touch()
+        with pytest.raises(ValueError, match="Kobo database file"):
+            backend._resolve_path(str(bad_db))
 
     def test_resolve_path_env_var(self, backend, db_path):
         with patch.dict("os.environ", {"KOBO_DB_PATH": db_path}):
