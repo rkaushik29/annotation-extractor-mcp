@@ -1,5 +1,6 @@
 .claude
 .venv/
+src/annotation_extractor/__pycache__/
 dist/
 __pycache__/
 *.pyc
