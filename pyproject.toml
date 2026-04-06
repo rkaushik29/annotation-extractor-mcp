@@ -1,12 +1,12 @@
 [project]
 name = "annotation-extractor"
-version = "0.2.1"
-description = "MCP server for extracting annotations and highlights from e-readers (Kobo, Kindle, and more)"
+version = "0.3.0"
+description = "MCP server for extracting annotations and highlights from e-readers (Kobo, Kindle, Boox)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Rohit Kaushik" }]
-keywords = ["ereader", "kobo", "kindle", "mcp", "annotations", "highlights", "ai"]
+keywords = ["ereader", "kobo", "kindle", "boox", "mcp", "annotations", "highlights", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

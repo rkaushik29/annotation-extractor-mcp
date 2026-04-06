@@ -16,8 +16,8 @@ mcp = FastMCP(
     "annotation-extractor",
     instructions=(
         "Provides access to highlights, annotations, books, and reading progress "
-        "from e-readers connected via USB. Currently supports Kobo, with more "
-        "backends coming. Use list_books to discover available books, then "
+        "from e-readers connected via USB. Supports Kobo, Kindle, and Boox. "
+        "Use list_books to discover available books, then "
         "get_annotations to retrieve highlights and notes for a specific book."
     ),
 )
