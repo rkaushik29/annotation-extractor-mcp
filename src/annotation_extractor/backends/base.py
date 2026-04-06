@@ -19,11 +19,14 @@ class EReaderBackend(ABC):
         """
         ...
 
+    DEFAULT_LIMIT = 500
+
     @abstractmethod
     def list_books(
         self,
         db_path: str | None = None,
         with_annotations_only: bool = True,
+        limit: int | None = None,
     ) -> list[Book]:
         """Return all books on the device."""
         ...
@@ -36,6 +39,7 @@ class EReaderBackend(ABC):
         db_path: str | None = None,
         highlights_only: bool = False,
         notes_only: bool = False,
+        limit: int | None = None,
     ) -> list[Annotation]:
         """Return annotations, optionally filtered by book."""
         ...
@@ -45,6 +49,7 @@ class EReaderBackend(ABC):
         self,
         query: str,
         db_path: str | None = None,
+        limit: int | None = None,
     ) -> list[Annotation]:
         """Full-text search across all annotations."""
         ...
@@ -53,6 +58,7 @@ class EReaderBackend(ABC):
     def get_reading_progress(
         self,
         db_path: str | None = None,
+        limit: int | None = None,
     ) -> list[ReadingProgress]:
         """Return reading progress for all books."""
         ...

@@ -14,6 +14,8 @@ from annotation_extractor.models import Annotation, Book, ReadingProgress
 
 
 class KoboBackend(EReaderBackend):
+    _VALID_DB_NAMES = {"KoboReader.sqlite"}
+
     name = "kobo"
 
     # ------------------------------------------------------------------
@@ -33,10 +35,15 @@ class KoboBackend(EReaderBackend):
                         candidates.append(candidate)
         elif system == "Linux":
             for base in [Path("/media"), Path("/mnt"), Path("/run/media")]:
-                if base.exists():
-                    for item in base.rglob("KoboReader.sqlite"):
-                        if ".kobo" in str(item):
-                            candidates.append(item)
+                if not base.exists():
+                    continue
+                # Only check two levels deep (user/device) to avoid
+                # hanging on network or FUSE mounts.
+                for user_dir in base.iterdir():
+                    for device_dir in user_dir.iterdir():
+                        candidate = device_dir / ".kobo" / "KoboReader.sqlite"
+                        if candidate.exists():
+                            candidates.append(candidate)
         elif system == "Windows":
             import string
             for letter in string.ascii_uppercase:
@@ -46,16 +53,27 @@ class KoboBackend(EReaderBackend):
 
         return str(candidates[0]) if candidates else None
 
+    @classmethod
+    def _validate_db_path(cls, p: Path) -> None:
+        """Ensure the path points to a recognised Kobo database file."""
+        if p.name not in cls._VALID_DB_NAMES:
+            raise ValueError(
+                f"Path must point to a Kobo database file "
+                f"({', '.join(cls._VALID_DB_NAMES)}), got: {p.name}"
+            )
+
     def _resolve_path(self, db_path: str | None) -> Path:
         if db_path:
-            p = Path(db_path)
+            p = Path(db_path).resolve()
+            self._validate_db_path(p)
             if p.exists():
                 return p
             raise FileNotFoundError(f"Database not found at {p}")
 
         env = os.environ.get("KOBO_DB_PATH")
         if env:
-            p = Path(env)
+            p = Path(env).resolve()
+            self._validate_db_path(p)
             if p.exists():
                 return p
             raise FileNotFoundError(f"KOBO_DB_PATH set but not found: {p}")
@@ -84,6 +102,7 @@ class KoboBackend(EReaderBackend):
         self,
         db_path: str | None = None,
         with_annotations_only: bool = True,
+        limit: int | None = None,
     ) -> list[Book]:
         conn = self._connect(db_path)
         try:
@@ -124,6 +143,9 @@ class KoboBackend(EReaderBackend):
                     ORDER BY c.DateLastRead DESC
                 """
 
+            effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+            query += f" LIMIT {effective_limit}"
+
             rows = conn.execute(query).fetchall()
             return [
                 Book(
@@ -150,6 +172,7 @@ class KoboBackend(EReaderBackend):
         db_path: str | None = None,
         highlights_only: bool = False,
         notes_only: bool = False,
+        limit: int | None = None,
     ) -> list[Annotation]:
         if not book_title and not content_id:
             raise ValueError("Provide either book_title or content_id.")
@@ -192,6 +215,9 @@ class KoboBackend(EReaderBackend):
 
             query += " ORDER BY b.ContentID, b.ChapterProgress, b.DateCreated"
 
+            effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+            query += f" LIMIT {effective_limit}"
+
             rows = conn.execute(query, params).fetchall()
             return [
                 Annotation(
@@ -215,10 +241,12 @@ class KoboBackend(EReaderBackend):
         self,
         query: str,
         db_path: str | None = None,
+        limit: int | None = None,
     ) -> list[Annotation]:
         conn = self._connect(db_path)
         try:
-            sql = """
+            effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+            sql = f"""
                 SELECT
                     b.Text as highlighted_text,
                     b.Annotation as note,
@@ -236,6 +264,7 @@ class KoboBackend(EReaderBackend):
                     ON c_chapter.ContentID = b.ContentID
                 WHERE (b.Text LIKE ? OR b.Annotation LIKE ?)
                 ORDER BY c_book.Title, b.ChapterProgress
+                LIMIT {effective_limit}
             """
             pattern = f"%{query}%"
             rows = conn.execute(sql, [pattern, pattern]).fetchall()
@@ -259,10 +288,12 @@ class KoboBackend(EReaderBackend):
     def get_reading_progress(
         self,
         db_path: str | None = None,
+        limit: int | None = None,
     ) -> list[ReadingProgress]:
         conn = self._connect(db_path)
         try:
-            sql = """
+            effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+            sql = f"""
                 SELECT
                     c.Title as title,
                     c.Attribution as author,
@@ -275,6 +306,7 @@ class KoboBackend(EReaderBackend):
                   AND c.Accessibility = 1
                   AND c.ReadStatus > 0
                 ORDER BY c.DateLastRead DESC
+                LIMIT {effective_limit}
             """
             rows = conn.execute(sql).fetchall()
             return [

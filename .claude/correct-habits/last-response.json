@@ -1,8 +1,0 @@
-{
-  "sessionId": "a833a488-9530-428f-9265-4762dff5e469",
-  "response": "Workflow is ready. Here's what you need to do:\n\n### 1. Push to GitHub\n```bash\ngit remote add origin git@github.com:rohitkaushik/annotation-extractor.git\ngit push -u origin main\n```\n\n### 2. Create a \"pypi\" environment on GitHub\nGo to **repo Settings > Environments > New environment** and name it `pypi`.\n\n### 3. Configure trusted publisher on PyPI\nGo to [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/) and add a new **pending publisher**:\n- **PyPI project name**: `annotation-extractor`\n- **Owner**: `rohitkaushik`\n- **Repository**: `annotation-extractor`\n- **Workflow name**: `publish.yml`\n- **Environment name**: `pypi`\n\n### 4. Publish\nCreate a release on GitHub (tag it `v0.1.0`) — the workflow builds and publishes automatically, no API token needed.\n\n---\n**Summary:**\n- Created `.github/workflows/publish.yml` using PyPI trusted publishing (OIDC, no tokens)\n- Triggers on GitHub releases — just tag and release to publish\n- You need to configure the pending publisher on pypi.org and create a `pypi` environment on the GitHub repo",
-  "toolsUsed": [],
-  "filesModified": [],
-  "codeWritten": "",
-  "timestamp": "2026-04-06T03:56:45.827Z"
-}
