@@ -10,6 +10,14 @@ Supports **Kobo**, **Kindle**, and **Boox**.
 pip install annotation-extractor
 ```
 
+### As an Agent Skill
+
+Install as a reusable skill for any AI coding agent via [skills.sh](https://skills.sh):
+
+```bash
+npx skills add rkaushik29/annotation-extractor-mcp
+```
+
 Or from source:
 
 ```bash
