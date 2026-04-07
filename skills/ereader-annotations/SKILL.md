@@ -5,53 +5,55 @@ description: Extract highlights, annotations, notes, and reading progress from U
 
 # E-Reader Annotation Extractor
 
-Extract highlights, annotations, notes, and reading progress from USB-connected e-readers. Supports **Kobo**, **Kindle**, and **Boox** devices.
+When the user asks about their reading highlights, annotations, notes, or reading progress from an e-reader, follow these steps.
 
-## Setup
+## Step 1: Check if the MCP server is already available
 
-Install the package:
+Look for tools named `list_books`, `get_annotations`, `search_annotations`, `get_reading_progress`, or `get_book_details` in your available tools. If they exist, skip to **Step 4: Use the tools**.
+
+## Step 2: Install the package
+
+Run:
 
 ```bash
 pip install annotation-extractor
 ```
 
-### MCP Server (Recommended)
+If `pip` is not available, try `uv pip install annotation-extractor` or `pipx install annotation-extractor`.
 
-The best way to use this is as an MCP server. Add it to your agent:
+## Step 3: Set up the MCP server
 
-| Agent | Setup |
-|-------|-------|
+Tell the user to add the MCP server to their agent. Detect which agent you are and give the appropriate command:
+
+| Agent | Command to give the user |
+|-------|--------------------------|
 | Claude Code | `claude mcp add annotations -- annotation-extractor` |
 | Claude Desktop | Add to `claude_desktop_config.json`: `{"mcpServers": {"annotations": {"command": "annotation-extractor"}}}` |
 | Cursor | Add to MCP config: `{"mcpServers": {"annotations": {"command": "annotation-extractor"}}}` |
 | Gemini CLI | Add to `~/.gemini/settings.json`: `{"mcpServers": {"annotations": {"command": "annotation-extractor"}}}` |
 | Codex | `codex --mcp-config mcp.json` with `mcp.json`: `{"mcpServers": {"annotations": {"command": "annotation-extractor"}}}` |
 
-Once configured, the MCP server provides these tools:
+If you can run the setup command yourself (e.g. in Claude Code), do so. Otherwise, show the user the exact command and ask them to run it, then restart the session.
 
-| Tool | Description |
-|------|-------------|
-| `list_books` | List all books, optionally filtered to those with annotations. Params: `backend_name`, `db_path`, `with_annotations_only`, `limit` |
-| `get_annotations` | Get highlights and notes for a specific book by title (partial match) or content_id (exact). Params: `book_title`, `content_id`, `highlights_only`, `notes_only`, `limit` |
-| `search_annotations` | Full-text search across all highlights and notes. Params: `query`, `limit` |
-| `get_reading_progress` | Reading progress, time spent, and status for all books. Params: `limit` |
-| `get_book_details` | Detailed metadata for a specific book. Params: `book_title`, `content_id` |
+**Important**: After MCP setup, the tools won't be available until the session is restarted. If you just set up the MCP server, tell the user to restart and try again. In the meantime, use the direct access method below to answer their question now.
 
-All tools accept optional `backend_name` (e.g., `"kobo"`, `"kindle"`, `"boox"`) and `db_path`. When omitted, the server auto-detects connected devices.
+## Step 4: Use the tools
 
-### Workflow
+If the MCP tools are available, use them in this order:
 
-1. Call `list_books` to discover what books are available and see annotation counts
-2. Use `get_annotations` with a `book_title` to retrieve highlights and notes for a specific book
-3. Use `search_annotations` to search across all highlights and notes
-4. Use `get_reading_progress` for an overview of reading activity
-5. Use `get_book_details` for full metadata (ISBN, publisher, description, series info)
+1. Call `list_books` to discover available books and annotation counts
+2. Use `get_annotations` with `book_title` (partial match) to get highlights and notes
+3. Use `search_annotations` with a `query` to search across all highlights
+4. Use `get_reading_progress` for reading activity overview
+5. Use `get_book_details` for full metadata (ISBN, publisher, series)
 
-## Direct Access (Without MCP)
+All tools accept optional `backend_name` (`"kobo"`, `"kindle"`, `"boox"`) and `db_path`. When omitted, connected devices are auto-detected.
 
-If your agent doesn't support MCP, you can query e-reader data directly.
+## Fallback: Direct access (if MCP is not available)
 
-### Using Python
+If you cannot set up MCP or need to answer the user's question right now, use these methods:
+
+### Option A: Python (preferred)
 
 ```bash
 pip install annotation-extractor
@@ -63,15 +65,29 @@ for book in b.list_books():
 "
 ```
 
-Replace `KoboBackend` with `KindleBackend` or `BooxBackend` as needed (import from `annotation_extractor.backends.kindle` or `annotation_extractor.backends.boox`).
+Replace `KoboBackend` with `KindleBackend` (from `annotation_extractor.backends.kindle`) or `BooxBackend` (from `annotation_extractor.backends.boox`) as needed.
 
-### Raw Database Access (Kobo)
+To get annotations for a specific book:
 
-Kobo stores data in a SQLite database at `.kobo/KoboReader.sqlite` on the mounted device.
+```bash
+python -c "
+from annotation_extractor.backends.kobo import KoboBackend
+b = KoboBackend()
+for a in b.get_annotations(book_title='BOOK_TITLE_HERE'):
+    print(f'[{a.chapter}] {a.highlighted_text}')
+    if a.note: print(f'  Note: {a.note}')
+"
+```
+
+### Option B: Raw SQLite (Kobo only, no install needed)
+
+If Python package installation is not possible, query the Kobo database directly. The database is at `.kobo/KoboReader.sqlite` on the mounted device:
 
 - **macOS**: `/Volumes/<DeviceName>/.kobo/KoboReader.sqlite`
 - **Linux**: `/media/<user>/<device>/.kobo/KoboReader.sqlite`
 - **Windows**: `<DriveLetter>:\.kobo\KoboReader.sqlite`
+
+### Raw SQLite queries (Kobo)
 
 List books with annotations:
 
@@ -98,21 +114,13 @@ ORDER BY b.ChapterProgress;
 "
 ```
 
-### Raw File Access (Kindle)
+### Raw file access (Kindle)
 
-Kindle stores clippings at `documents/My Clippings.txt` on the mounted device. Entries are separated by `==========`. Each entry has:
+Kindle stores clippings at `documents/My Clippings.txt` on the mounted device. Entries are separated by `==========` with format: title line, metadata line, blank line, highlighted text.
 
-```
-Book Title (Author)
-- Your Highlight on page X | Location Y-Z | Added on Day, Month DD, YYYY HH:MM:SS AM/PM
+### Raw file access (Boox)
 
-Highlighted text here
-==========
-```
-
-### Raw File Access (Boox)
-
-Boox exports one `.txt` file per book into an export directory. Files are named `BookTitle-annotation-YYYY-MM-DD_HH_MM_SS.txt`. Each file has a header line and annotation entries with metadata (date, page number) followed by highlighted text and optional notes.
+Boox exports one `.txt` file per book into a directory (`boox-export/`, `Export/`, `note/`, or `Notes/` on the device). Files are named `BookTitle-annotation-YYYY-MM-DD_HH_MM_SS.txt`.
 
 ## Environment Variables
 
