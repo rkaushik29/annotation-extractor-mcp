@@ -17,6 +17,7 @@ mcp = FastMCP(
     instructions=(
         "Provides access to highlights, annotations, books, and reading progress "
         "from e-readers connected via USB. Supports Kobo, Kindle, and Boox. "
+        "Can also discover and export handwritten notes from Kindle Scribe and Boox. "
         "Use list_books to discover available books, then "
         "get_annotations to retrieve highlights and notes for a specific book."
     ),
@@ -92,6 +93,76 @@ def get_annotations(
         limit=limit,
     )
     return [a.to_dict() for a in annotations]
+
+
+@mcp.tool()
+def get_handwritten_notes(
+    book_title: Optional[str] = None,
+    content_id: Optional[str] = None,
+    backend_name: Optional[str] = None,
+    db_path: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> list[dict]:
+    """List handwritten note artifacts available on the e-reader.
+
+    This is primarily supported for Kindle Scribe and Boox.
+
+    Args:
+        book_title: Optional partial title filter.
+        content_id: Optional exact content ID filter.
+        backend_name: Which e-reader backend to use. Auto-detected if omitted.
+        db_path: Optional explicit path to the backend source path.
+        limit: Maximum number of results to return. Defaults to 500.
+
+    Returns:
+        List of handwritten note artifacts with source file paths and metadata.
+    """
+    backend = get_backend(backend_name, db_path)
+    notes = backend.get_handwritten_notes(
+        book_title=book_title,
+        content_id=content_id,
+        db_path=db_path,
+        limit=limit,
+    )
+    return [n.to_dict() for n in notes]
+
+
+@mcp.tool()
+def export_handwritten_notes(
+    output_dir: str,
+    book_title: Optional[str] = None,
+    content_id: Optional[str] = None,
+    backend_name: Optional[str] = None,
+    db_path: Optional[str] = None,
+    limit: Optional[int] = None,
+    render: bool = False,
+) -> list[dict]:
+    """Export handwritten note artifacts to a local directory.
+
+    Args:
+        output_dir: Local directory where exported files will be written.
+        book_title: Optional partial title filter.
+        content_id: Optional exact content ID filter.
+        backend_name: Which e-reader backend to use. Auto-detected if omitted.
+        db_path: Optional explicit path to the backend source path.
+        limit: Maximum number of results to return. Defaults to 500.
+        render: If True, try backend-specific rendering when available
+                (e.g. Kindle Scribe notebooks via KFX Input, Boox backups via
+                external renderer tools).
+
+    Returns:
+        List of exported handwritten note artifacts including output file paths.
+    """
+    backend = get_backend(backend_name, db_path)
+    notes = backend.export_handwritten_notes(
+        output_dir=output_dir,
+        book_title=book_title,
+        content_id=content_id,
+        db_path=db_path,
+        limit=limit,
+        render=render,
+    )
+    return [n.to_dict() for n in notes]
 
 
 @mcp.tool()

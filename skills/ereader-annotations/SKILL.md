@@ -9,7 +9,7 @@ When the user asks about their reading highlights, annotations, notes, or readin
 
 ## Step 1: Check if the MCP server is already available
 
-Look for tools named `list_books`, `get_annotations`, `search_annotations`, `get_reading_progress`, or `get_book_details` in your available tools. If they exist, skip to **Step 4: Use the tools**.
+Look for tools named `list_books`, `get_annotations`, `search_annotations`, `get_reading_progress`, `get_book_details`, `get_handwritten_notes`, or `export_handwritten_notes` in your available tools. If they exist, skip to **Step 4: Use the tools**.
 
 ## Step 2: Install the package
 
@@ -46,6 +46,8 @@ If the MCP tools are available, use them in this order:
 3. Use `search_annotations` with a `query` to search across all highlights
 4. Use `get_reading_progress` for reading activity overview
 5. Use `get_book_details` for full metadata (ISBN, publisher, series)
+6. Use `get_handwritten_notes` to discover Kindle Scribe / Boox handwritten artifacts
+7. Use `export_handwritten_notes` to copy handwritten files to a local output folder
 
 All tools accept optional `backend_name` (`"kobo"`, `"kindle"`, `"boox"`) and `db_path`. When omitted, connected devices are auto-detected.
 
@@ -131,6 +133,9 @@ If auto-detection doesn't find your device, point to the data source directly:
 | `KOBO_DB_PATH` | Path to `KoboReader.sqlite` |
 | `KINDLE_CLIPPINGS_PATH` | Path to `My Clippings.txt` |
 | `BOOX_EXPORT_PATH` | Path to Boox annotation export directory |
+| `KINDLE_SCRIBE_PATH` | Path to Kindle mount root or `.notebooks` directory |
+| `KINDLE_SCRIBE_CONVERTER` | Command for Kindle Scribe rendering (default: `calibre-debug`) |
+| `BOOX_NOTE_RENDERER` | Command for Boox backup rendering (default: `onyx_render.py`) |
 
 ## Data Model Reference
 

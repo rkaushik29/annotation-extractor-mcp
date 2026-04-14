@@ -1,6 +1,7 @@
 """Tests for the Boox backend."""
 
 import codecs
+from pathlib import Path
 
 import pytest
 
@@ -393,6 +394,73 @@ class TestGetBookDetails:
         )
         assert book is not None
         assert book.annotation_count == 1
+
+
+# ------------------------------------------------------------------
+# Handwritten notes
+# ------------------------------------------------------------------
+
+
+class TestHandwrittenNotes:
+    def test_get_handwritten_notes_finds_exported_pdf_png(self, backend, export_dir):
+        root = Path(export_dir)
+        (root / "Neuromancer-annotation-2024-01-16_14_00_00.pdf").write_text(
+            "dummy",
+            encoding="utf-8",
+        )
+        (root / "Snow Crash-annotation-2024-02-21_09_00.png").write_bytes(b"dummy")
+
+        notes = backend.get_handwritten_notes(db_path=export_dir)
+        titles = {n.title for n in notes}
+        assert "Neuromancer" in titles
+        assert "Snow Crash" in titles
+
+    def test_get_handwritten_notes_finds_backup_zip(self, backend, export_dir):
+        root = Path(export_dir)
+        backup_dir = root / "note" / "backup" / "local"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "boox-notes.zip").write_bytes(b"dummy")
+
+        notes = backend.get_handwritten_notes(db_path=export_dir)
+        assert any(n.artifact_type == "backup_zip" for n in notes)
+
+    def test_export_handwritten_notes_copies_files(self, backend, export_dir, tmp_path):
+        root = Path(export_dir)
+        source = root / "Neuromancer-annotation-2024-01-16_14_00_00.pdf"
+        source.write_text("dummy", encoding="utf-8")
+
+        exported = backend.export_handwritten_notes(
+            output_dir=str(tmp_path / "out"),
+            db_path=export_dir,
+        )
+        assert len(exported) >= 1
+
+        copied = [Path(path) for note in exported for path in note.exported_paths]
+        assert any(path.name == source.name for path in copied)
+        assert all(path.exists() for path in copied)
+
+    def test_export_handwritten_notes_reports_missing_renderer(
+        self,
+        backend,
+        export_dir,
+        tmp_path,
+        monkeypatch,
+    ):
+        root = Path(export_dir)
+        backup_dir = root / "note" / "backup" / "local"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "boox-notes.zip").write_bytes(b"dummy")
+
+        monkeypatch.setenv("BOOX_NOTE_RENDERER", "missing-renderer")
+        exported = backend.export_handwritten_notes(
+            output_dir=str(tmp_path / "out"),
+            db_path=export_dir,
+            render=True,
+        )
+
+        backup_exports = [e for e in exported if e.artifact_type == "backup_zip"]
+        assert len(backup_exports) == 1
+        assert backup_exports[0].render_status == "render_skipped: renderer_not_found"
 
 
 # ------------------------------------------------------------------

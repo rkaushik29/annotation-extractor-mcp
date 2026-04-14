@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from annotation_extractor.models import Annotation, Book, ReadingProgress
+from annotation_extractor.models import Annotation, Book, HandwrittenNote, ReadingProgress
 
 
 class EReaderBackend(ABC):
@@ -72,3 +72,29 @@ class EReaderBackend(ABC):
     ) -> Book | None:
         """Return detailed metadata for a specific book."""
         ...
+
+    def supports_handwritten_notes(self) -> bool:
+        """Return whether this backend can discover handwritten notes."""
+        return False
+
+    def get_handwritten_notes(
+        self,
+        book_title: str | None = None,
+        content_id: str | None = None,
+        db_path: str | None = None,
+        limit: int | None = None,
+    ) -> list[HandwrittenNote]:
+        """Return handwritten notes, drawings, or markup artifacts."""
+        return []
+
+    def export_handwritten_notes(
+        self,
+        output_dir: str,
+        book_title: str | None = None,
+        content_id: str | None = None,
+        db_path: str | None = None,
+        limit: int | None = None,
+        render: bool = False,
+    ) -> list[HandwrittenNote]:
+        """Export handwritten note artifacts to a local directory."""
+        return []

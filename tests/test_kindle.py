@@ -1,6 +1,7 @@
 """Tests for the Kindle backend."""
 
 import codecs
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +51,23 @@ def clippings_path(tmp_path):
 @pytest.fixture
 def backend():
     return KindleBackend()
+
+
+@pytest.fixture
+def scribe_mount(tmp_path):
+    root = tmp_path / "KindleScribe"
+    notebooks_dir = root / ".notebooks"
+
+    notebook = notebooks_dir / "B0TEST123!!EBOK!!notebook"
+    notebook.mkdir(parents=True)
+    (notebook / "nbk").write_text("dummy", encoding="utf-8")
+    (notebook / "nbk-journal").write_text("", encoding="utf-8")
+
+    standalone = notebooks_dir / "standalone-notebook-1"
+    standalone.mkdir(parents=True)
+    (standalone / "nbk").write_text("dummy", encoding="utf-8")
+
+    return str(root)
 
 
 # ------------------------------------------------------------------
@@ -355,6 +373,61 @@ class TestGetBookDetails:
     def test_requires_title_or_id(self, backend, clippings_path):
         with pytest.raises(ValueError, match="Provide either"):
             backend.get_book_details(db_path=clippings_path)
+
+
+# ------------------------------------------------------------------
+# Handwritten notes (Kindle Scribe)
+# ------------------------------------------------------------------
+
+
+class TestHandwrittenNotes:
+    def test_get_handwritten_notes_discovers_scribe_notebooks(self, backend, scribe_mount):
+        notes = backend.get_handwritten_notes(db_path=scribe_mount)
+        assert len(notes) == 2
+        by_id = {n.note_id: n for n in notes}
+        assert "B0TEST123!!EBOK!!notebook" in by_id
+        assert by_id["B0TEST123!!EBOK!!notebook"].content_id == "B0TEST123"
+
+    def test_get_handwritten_notes_filter_by_content_id(self, backend, scribe_mount):
+        notes = backend.get_handwritten_notes(
+            db_path=scribe_mount,
+            content_id="B0TEST123",
+        )
+        assert len(notes) == 1
+        assert notes[0].note_id == "B0TEST123!!EBOK!!notebook"
+
+    def test_export_handwritten_notes_copies_raw_files(self, backend, scribe_mount, tmp_path):
+        output_dir = tmp_path / "exported"
+        exported = backend.export_handwritten_notes(
+            output_dir=str(output_dir),
+            db_path=scribe_mount,
+        )
+        assert len(exported) == 2
+
+        exported_paths = [
+            Path(path)
+            for note in exported
+            for path in note.exported_paths
+        ]
+        assert any(path.name == "nbk" for path in exported_paths)
+        assert all(path.exists() for path in exported_paths)
+
+    def test_export_handwritten_notes_reports_missing_converter(
+        self,
+        backend,
+        scribe_mount,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("KINDLE_SCRIBE_CONVERTER", "missing-converter")
+        exported = backend.export_handwritten_notes(
+            output_dir=str(tmp_path / "exported"),
+            db_path=scribe_mount,
+            render=True,
+        )
+
+        assert len(exported) == 2
+        assert all(note.render_status == "render_skipped: converter_not_found" for note in exported)
 
     def test_annotation_count(self, backend, clippings_path):
         book = backend.get_book_details(

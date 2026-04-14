@@ -1,6 +1,6 @@
 """Shared data models for e-reader annotations."""
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 
 @dataclass
@@ -52,6 +52,24 @@ class ReadingProgress:
     last_read: str | None
     read_status: int | None
     source: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class HandwrittenNote:
+    note_id: str
+    source: str
+    title: str | None = None
+    author: str | None = None
+    content_id: str | None = None
+    artifact_type: str | None = None
+    source_paths: list[str] = field(default_factory=list)
+    exported_paths: list[str] = field(default_factory=list)
+    date_created: str | None = None
+    date_modified: str | None = None
+    render_status: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

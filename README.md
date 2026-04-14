@@ -58,6 +58,14 @@ KINDLE_CLIPPINGS_PATH=/path/to/My\ Clippings.txt annotation-extractor
 BOOX_EXPORT_PATH=/path/to/boox-export annotation-extractor
 ```
 
+For handwritten note extraction and rendering, these optional variables are also supported:
+
+```bash
+KINDLE_SCRIBE_PATH=/path/to/kindle-mount annotation-extractor
+KINDLE_SCRIBE_CONVERTER=calibre-debug annotation-extractor
+BOOX_NOTE_RENDERER=onyx_render.py annotation-extractor
+```
+
 ## Supported e-readers
 
 | Reader | Data source |
@@ -65,6 +73,11 @@ BOOX_EXPORT_PATH=/path/to/boox-export annotation-extractor
 | Kobo | `.kobo/KoboReader.sqlite` via USB |
 | Kindle | `My Clippings.txt` via USB |
 | Boox | Annotation export directory (one `.txt` file per book) via USB |
+
+Handwritten notes are supported for:
+
+- Kindle Scribe notebooks via `.notebooks/` (raw export, optional render via KFX Input)
+- Boox handwritten exports (`.pdf` / `.png`) and local backup `.zip` files (optional render)
 
 ## Tools
 
@@ -75,6 +88,8 @@ BOOX_EXPORT_PATH=/path/to/boox-export annotation-extractor
 | `search_annotations` | Full-text search across all highlights and notes |
 | `get_reading_progress` | Reading progress, time spent, and status for all books |
 | `get_book_details` | Detailed metadata for a specific book |
+| `get_handwritten_notes` | List handwritten note artifacts (Kindle Scribe / Boox) |
+| `export_handwritten_notes` | Export handwritten note artifacts to a local directory |
 
 All tools accept optional `backend_name` (e.g., `"kobo"`, `"kindle"`, `"boox"`) and `db_path` parameters. When omitted, the server auto-detects connected devices.
 

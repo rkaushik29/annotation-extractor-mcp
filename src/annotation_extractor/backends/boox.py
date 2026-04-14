@@ -9,12 +9,14 @@ import logging
 import os
 import platform
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from annotation_extractor.backends.base import EReaderBackend
-from annotation_extractor.models import Annotation, Book, ReadingProgress
+from annotation_extractor.models import Annotation, Book, HandwrittenNote, ReadingProgress
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,13 @@ _ANNOTATION_META_RE = re.compile(
 _FILENAME_RE = re.compile(
     r"^.+-annotation-\d{4}-\d{2}-\d{2}_\d{2}_\d{2}(?:_\d{2})?\.txt$"
 )
+
+_HANDWRITTEN_EXPORT_RE = re.compile(
+    r"^(?P<title>.+)-annotation-\d{4}-\d{2}-\d{2}_\d{2}_\d{2}(?:_\d{2})?\.(?P<ext>pdf|png)$",
+    re.IGNORECASE,
+)
+
+_BOOX_BACKUP_ZIP_RE = re.compile(r".+\.zip$", re.IGNORECASE)
 
 _BOOX_DATE_FORMAT = "%Y-%m-%d %H:%M"
 
@@ -55,6 +64,15 @@ class _BooxBookData:
     content_id: str | None
     annotations: list[_BooxAnnotation] = field(default_factory=list)
     last_date: datetime | None = None
+
+
+@dataclass
+class _BooxHandwrittenArtifact:
+    note_id: str
+    title: str
+    content_id: str | None
+    artifact_type: str
+    source_path: Path
 
 
 def _parse_boox_date(raw: str) -> datetime | None:
@@ -262,6 +280,97 @@ class BooxBackend(EReaderBackend):
         directory = self._resolve_path(db_path)
         return _load_all_books(directory)
 
+    def _resolve_handwritten_root(self, db_path: str | None) -> Path:
+        if db_path:
+            p = Path(db_path).resolve()
+            if p.is_file():
+                return p.parent
+            if p.is_dir():
+                return p
+            raise FileNotFoundError(f"Boox path not found at {p}")
+
+        env = os.environ.get("BOOX_EXPORT_PATH")
+        if env:
+            p = Path(env).resolve()
+            if p.is_dir():
+                return p
+
+        detected = self.detect()
+        if detected:
+            return Path(detected)
+
+        raise FileNotFoundError(
+            "Could not find Boox export directory. "
+            "Connect your Boox device via USB or set BOOX_EXPORT_PATH."
+        )
+
+    @staticmethod
+    def _filter_handwritten_artifacts(
+        artifacts: list[_BooxHandwrittenArtifact],
+        book_title: str | None,
+        content_id: str | None,
+    ) -> list[_BooxHandwrittenArtifact]:
+        if content_id:
+            return [a for a in artifacts if a.content_id == content_id]
+
+        if book_title:
+            query = book_title.lower()
+            return [
+                a
+                for a in artifacts
+                if query in a.title.lower() or query in a.note_id.lower()
+            ]
+
+        return artifacts
+
+    def _discover_handwritten_artifacts(self, root: Path) -> list[_BooxHandwrittenArtifact]:
+        artifacts: list[_BooxHandwrittenArtifact] = []
+
+        # Handwriting exports from NeoReader are often stored as
+        # <BookTitle>-annotation-YYYY-MM-DD_HH_MM[_SS].pdf/png
+        for file_path in sorted(root.iterdir()):
+            if not file_path.is_file():
+                continue
+
+            match = _HANDWRITTEN_EXPORT_RE.match(file_path.name)
+            if match:
+                title = match.group("title").strip()
+                ext = match.group("ext").lower()
+                artifacts.append(
+                    _BooxHandwrittenArtifact(
+                        note_id=file_path.stem,
+                        title=title,
+                        content_id=None,
+                        artifact_type=ext,
+                        source_path=file_path,
+                    )
+                )
+
+        # Optional local note backups
+        backup_roots = [
+            root / "backup" / "local",
+            root / "note" / "backup" / "local",
+        ]
+        for backup_root in backup_roots:
+            if not backup_root.is_dir():
+                continue
+            for file_path in sorted(backup_root.iterdir()):
+                if not file_path.is_file():
+                    continue
+                if not _BOOX_BACKUP_ZIP_RE.match(file_path.name):
+                    continue
+                artifacts.append(
+                    _BooxHandwrittenArtifact(
+                        note_id=file_path.stem,
+                        title=file_path.stem,
+                        content_id=None,
+                        artifact_type="backup_zip",
+                        source_path=file_path,
+                    )
+                )
+
+        return artifacts
+
     # ------------------------------------------------------------------
     # Tool implementations
     # ------------------------------------------------------------------
@@ -421,6 +530,125 @@ class BooxBackend(EReaderBackend):
             )
 
         return None
+
+    # ------------------------------------------------------------------
+    # Handwritten notes
+    # ------------------------------------------------------------------
+
+    def supports_handwritten_notes(self) -> bool:
+        return True
+
+    def get_handwritten_notes(
+        self,
+        book_title: str | None = None,
+        content_id: str | None = None,
+        db_path: str | None = None,
+        limit: int | None = None,
+    ) -> list[HandwrittenNote]:
+        root = self._resolve_handwritten_root(db_path)
+        artifacts = self._discover_handwritten_artifacts(root)
+        artifacts = self._filter_handwritten_artifacts(
+            artifacts,
+            book_title=book_title,
+            content_id=content_id,
+        )
+
+        effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+        artifacts = artifacts[:effective_limit]
+
+        notes: list[HandwrittenNote] = []
+        for artifact in artifacts:
+            notes.append(
+                HandwrittenNote(
+                    note_id=artifact.note_id,
+                    source=self.name,
+                    title=artifact.title,
+                    content_id=artifact.content_id,
+                    artifact_type=artifact.artifact_type,
+                    source_paths=[str(artifact.source_path)],
+                    date_modified=datetime.fromtimestamp(
+                        artifact.source_path.stat().st_mtime
+                    ).isoformat(),
+                )
+            )
+
+        return notes
+
+    def export_handwritten_notes(
+        self,
+        output_dir: str,
+        book_title: str | None = None,
+        content_id: str | None = None,
+        db_path: str | None = None,
+        limit: int | None = None,
+        render: bool = False,
+    ) -> list[HandwrittenNote]:
+        root = self._resolve_handwritten_root(db_path)
+        artifacts = self._discover_handwritten_artifacts(root)
+        artifacts = self._filter_handwritten_artifacts(
+            artifacts,
+            book_title=book_title,
+            content_id=content_id,
+        )
+
+        effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+        artifacts = artifacts[:effective_limit]
+
+        output_root = Path(output_dir).expanduser().resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+
+        renderer = os.environ.get("BOOX_NOTE_RENDERER", "onyx_render.py")
+        renderer_available = shutil.which(renderer) is not None
+
+        exported: list[HandwrittenNote] = []
+        for artifact in artifacts:
+            artifact_dir = output_root / artifact.note_id
+            raw_dir = artifact_dir / "raw"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+
+            copied_path = raw_dir / artifact.source_path.name
+            shutil.copy2(artifact.source_path, copied_path)
+            exported_paths = [str(copied_path)]
+            render_status = None
+
+            if render and artifact.artifact_type == "backup_zip":
+                if renderer_available:
+                    rendered_dir = artifact_dir / "rendered"
+                    rendered_dir.mkdir(parents=True, exist_ok=True)
+                    command = [renderer, str(artifact.source_path), str(rendered_dir)]
+                    try:
+                        subprocess.run(
+                            command,
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        rendered_pdfs = sorted(rendered_dir.rglob("*.pdf"))
+                        for pdf in rendered_pdfs:
+                            exported_paths.append(str(pdf))
+                        render_status = "rendered" if rendered_pdfs else "render_failed: no_output"
+                    except (subprocess.SubprocessError, OSError) as exc:
+                        render_status = f"render_failed: {exc}"
+                else:
+                    render_status = "render_skipped: renderer_not_found"
+
+            exported.append(
+                HandwrittenNote(
+                    note_id=artifact.note_id,
+                    source=self.name,
+                    title=artifact.title,
+                    content_id=artifact.content_id,
+                    artifact_type=artifact.artifact_type,
+                    source_paths=[str(artifact.source_path)],
+                    exported_paths=exported_paths,
+                    render_status=render_status,
+                    date_modified=datetime.fromtimestamp(
+                        artifact.source_path.stat().st_mtime
+                    ).isoformat(),
+                )
+            )
+
+        return exported
 
 
 def _build_annotations(

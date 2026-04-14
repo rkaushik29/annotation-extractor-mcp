@@ -8,12 +8,15 @@ import logging
 import os
 import platform
 import re
+import shutil
+import subprocess
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from annotation_extractor.backends.base import EReaderBackend
-from annotation_extractor.models import Annotation, Book, ReadingProgress
+from annotation_extractor.models import Annotation, Book, HandwrittenNote, ReadingProgress
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,8 @@ _META_PAGE_ONLY_RE = re.compile(
 
 _DATE_FORMAT = "%A, %B %d, %Y %I:%M:%S %p"
 
+_SCRIBE_NOTEBOOK_RE = re.compile(r"^(?P<content_id>[^!]+)!!(?P<cde_type>EBOK|PDOC)!!notebook$")
+
 
 @dataclass
 class _ClippingEntry:
@@ -61,6 +66,16 @@ class _BookData:
     author: str | None
     entries: list[_ClippingEntry] = field(default_factory=list)
     last_date: datetime | None = None
+
+
+@dataclass
+class _ScribeNotebook:
+    note_id: str
+    content_id: str | None
+    cde_type: str | None
+    title: str
+    directory: Path
+    source_paths: list[str]
 
 
 def _parse_date(raw: str) -> datetime | None:
@@ -314,6 +329,155 @@ class KindleBackend(EReaderBackend):
         books = _group_by_book(entries)
         return books, entries
 
+    def _iter_mount_roots(self) -> list[Path]:
+        roots: list[Path] = []
+        system = platform.system()
+
+        if system == "Darwin":
+            volumes = Path("/Volumes")
+            if volumes.exists():
+                roots.extend([p for p in volumes.iterdir() if p.is_dir()])
+        elif system == "Linux":
+            for base in [Path("/media"), Path("/mnt"), Path("/run/media")]:
+                if not base.exists():
+                    continue
+                for first_level in base.iterdir():
+                    if not first_level.is_dir():
+                        continue
+                    roots.append(first_level)
+                    for second_level in first_level.iterdir():
+                        if second_level.is_dir():
+                            roots.append(second_level)
+        elif system == "Windows":
+            import string
+
+            for letter in string.ascii_uppercase:
+                drive = Path(f"{letter}:")
+                if drive.exists():
+                    roots.append(drive)
+
+        # Dedupe while preserving order
+        seen: set[Path] = set()
+        ordered: list[Path] = []
+        for root in roots:
+            if root in seen:
+                continue
+            seen.add(root)
+            ordered.append(root)
+        return ordered
+
+    def _detect_scribe_root(self) -> Path | None:
+        for root in self._iter_mount_roots():
+            if (root / ".notebooks").is_dir():
+                return root
+        return None
+
+    def _resolve_scribe_root(self, db_path: str | None) -> Path:
+        def _normalize_candidate(path: Path) -> Path:
+            if path.is_file():
+                if path.name == "My Clippings.txt" and path.parent.name.lower() == "documents":
+                    return path.parent.parent
+                return path.parent
+
+            if path.is_dir():
+                if path.name == ".notebooks":
+                    return path.parent
+                if (path / ".notebooks").is_dir():
+                    return path
+                if path.name.endswith("!!notebook") and path.parent.name == ".notebooks":
+                    return path.parent.parent
+                return path
+
+            raise FileNotFoundError(f"Kindle path not found: {path}")
+
+        if db_path:
+            return _normalize_candidate(Path(db_path).resolve())
+
+        env = os.environ.get("KINDLE_SCRIBE_PATH")
+        if env:
+            return _normalize_candidate(Path(env).resolve())
+
+        detected = self._detect_scribe_root()
+        if detected:
+            return detected
+
+        detected_clippings = self.detect()
+        if detected_clippings:
+            return _normalize_candidate(Path(detected_clippings))
+
+        raise FileNotFoundError(
+            "Could not find Kindle Scribe notebooks. "
+            "Connect your Kindle Scribe via USB or set KINDLE_SCRIBE_PATH."
+        )
+
+    @staticmethod
+    def _filter_scribe_notebooks(
+        notebooks: list[_ScribeNotebook],
+        book_title: str | None,
+        content_id: str | None,
+    ) -> list[_ScribeNotebook]:
+        if content_id:
+            return [n for n in notebooks if n.content_id == content_id]
+
+        if book_title:
+            query = book_title.lower()
+            return [
+                n
+                for n in notebooks
+                if query in n.title.lower() or query in n.note_id.lower()
+            ]
+
+        return notebooks
+
+    def _discover_scribe_notebooks(self, root: Path) -> list[_ScribeNotebook]:
+        notebooks_dir = root / ".notebooks"
+        if not notebooks_dir.is_dir():
+            return []
+
+        notebooks: list[_ScribeNotebook] = []
+        for folder in sorted(notebooks_dir.iterdir()):
+            if not folder.is_dir():
+                continue
+            if folder.name.startswith("."):
+                continue
+            if folder.name.lower() == "thumbnails":
+                continue
+
+            source_paths: list[str] = []
+            for file_path in sorted(folder.iterdir()):
+                if not file_path.is_file():
+                    continue
+                if file_path.name in {"nbk", "nbk-journal"}:
+                    source_paths.append(str(file_path))
+
+            if not source_paths:
+                source_paths = [
+                    str(file_path)
+                    for file_path in sorted(folder.iterdir())
+                    if file_path.is_file()
+                ]
+
+            if not source_paths:
+                continue
+
+            match = _SCRIBE_NOTEBOOK_RE.match(folder.name)
+            content_id = match.group("content_id") if match else None
+            cde_type = match.group("cde_type") if match else None
+            title = content_id or folder.name
+
+            notebooks.append(
+                _ScribeNotebook(
+                    note_id=folder.name,
+                    content_id=content_id,
+                    cde_type=cde_type,
+                    title=title,
+                    directory=folder,
+                    source_paths=source_paths,
+                )
+            )
+
+        return notebooks
+
     # ------------------------------------------------------------------
     # Tool implementations
     # ------------------------------------------------------------------
@@ -471,3 +635,153 @@ class KindleBackend(EReaderBackend):
                 )
 
         return None
+
+    # ------------------------------------------------------------------
+    # Handwritten notes (Kindle Scribe)
+    # ------------------------------------------------------------------
+
+    def supports_handwritten_notes(self) -> bool:
+        return True
+
+    def get_handwritten_notes(
+        self,
+        book_title: str | None = None,
+        content_id: str | None = None,
+        db_path: str | None = None,
+        limit: int | None = None,
+    ) -> list[HandwrittenNote]:
+        root = self._resolve_scribe_root(db_path)
+        notebooks = self._discover_scribe_notebooks(root)
+        notebooks = self._filter_scribe_notebooks(
+            notebooks,
+            book_title=book_title,
+            content_id=content_id,
+        )
+
+        effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+        notebooks = notebooks[:effective_limit]
+
+        notes: list[HandwrittenNote] = []
+        for notebook in notebooks:
+            modified = datetime.fromtimestamp(notebook.directory.stat().st_mtime).isoformat()
+            note_type = "nbk" if any(Path(p).name == "nbk" for p in notebook.source_paths) else "notebook_bundle"
+            notes.append(
+                HandwrittenNote(
+                    note_id=notebook.note_id,
+                    source=self.name,
+                    title=notebook.title,
+                    content_id=notebook.content_id,
+                    artifact_type=note_type,
+                    source_paths=notebook.source_paths,
+                    date_modified=modified,
+                )
+            )
+
+        return notes
+
+    def export_handwritten_notes(
+        self,
+        output_dir: str,
+        book_title: str | None = None,
+        content_id: str | None = None,
+        db_path: str | None = None,
+        limit: int | None = None,
+        render: bool = False,
+    ) -> list[HandwrittenNote]:
+        root = self._resolve_scribe_root(db_path)
+        notebooks = self._discover_scribe_notebooks(root)
+        notebooks = self._filter_scribe_notebooks(
+            notebooks,
+            book_title=book_title,
+            content_id=content_id,
+        )
+
+        effective_limit = limit if limit is not None else self.DEFAULT_LIMIT
+        notebooks = notebooks[:effective_limit]
+
+        output_root = Path(output_dir).expanduser().resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+
+        converter = os.environ.get("KINDLE_SCRIBE_CONVERTER", "calibre-debug")
+        converter_available = shutil.which(converter) is not None
+
+        exported: list[HandwrittenNote] = []
+        for notebook in notebooks:
+            target = output_root / notebook.note_id
+            raw_target = target / "raw"
+            raw_target.mkdir(parents=True, exist_ok=True)
+
+            exported_paths: list[str] = []
+            for source_path in notebook.source_paths:
+                src = Path(source_path)
+                if not src.exists():
+                    continue
+                dst = raw_target / src.name
+                shutil.copy2(src, dst)
+                exported_paths.append(str(dst))
+
+            render_status = None
+            if render:
+                if converter_available:
+                    rendered_target = target / "rendered"
+                    rendered_target.mkdir(parents=True, exist_ok=True)
+                    epub_path = rendered_target / f"{notebook.note_id}.epub"
+                    command = [
+                        converter,
+                        "-r",
+                        "KFX Input",
+                        "--",
+                        str(notebook.directory),
+                        str(epub_path),
+                    ]
+                    try:
+                        subprocess.run(
+                            command,
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        if epub_path.exists():
+                            exported_paths.append(str(epub_path))
+                            with zipfile.ZipFile(epub_path) as zipf:
+                                members = [
+                                    m
+                                    for m in zipf.namelist()
+                                    if m.lower().endswith(".svg")
+                                ]
+                                if members:
+                                    svg_target = rendered_target / "svg"
+                                    svg_target.mkdir(parents=True, exist_ok=True)
+                                    for member in members:
+                                        svg_name = Path(member).name
+                                        if not svg_name:
+                                            continue
+                                        destination = svg_target / svg_name
+                                        with zipf.open(member) as src_file, destination.open("wb") as dst_file:
+                                            shutil.copyfileobj(src_file, dst_file)
+                                        exported_paths.append(str(destination))
+                            render_status = "rendered"
+                        else:
+                            render_status = "render_failed: no_output"
+                    except (subprocess.SubprocessError, OSError, zipfile.BadZipFile) as exc:
+                        render_status = f"render_failed: {exc}"
+                else:
+                    render_status = "render_skipped: converter_not_found"
+
+            exported.append(
+                HandwrittenNote(
+                    note_id=notebook.note_id,
+                    source=self.name,
+                    title=notebook.title,
+                    content_id=notebook.content_id,
+                    artifact_type="nbk",
+                    source_paths=notebook.source_paths,
+                    exported_paths=exported_paths,
+                    render_status=render_status,
+                    date_modified=datetime.fromtimestamp(
+                        notebook.directory.stat().st_mtime
+                    ).isoformat(),
+                )
+            )
+
+        return exported
